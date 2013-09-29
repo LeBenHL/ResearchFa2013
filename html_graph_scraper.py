@@ -6,7 +6,8 @@ from pygraph.algorithms.searching import depth_first_search
 from pygraph.algorithms.minmax import heuristic_search
 
 state_node_pattern = "[\s]*def ([^\s]*State)\("
-edge_label_pattern = "[\s]*(elif|if) [^\s]* (in|==|is) ([^\s:]*( \| [^:]*)?)"
+#edge_label_pattern = "[\s]*(elif|if) [^\s]* (in|==|is) ([^\s:]*( \| [^:]*)?)"
+edge_label_pattern = "[\s]*(elif|if) [^\s]* (in|==|is) ([^:]*):"
 else_pattern = "[\s]*else:"
 end_node_pattern = "[\s]*self\.state = self\.([^\s]*)"
 parse_error_pattern = '.*tokenTypes\["ParseError"\].*'
@@ -115,7 +116,8 @@ def _parseEdgeEndNodes(graph, outgoing_node, label, f):
     match = re.match(parse_error_pattern, line)
     if match:
       #Parse Error! We don't want parse errors
-      break
+      #break
+      pass
 
     match = re.match(edge_label_pattern, line)
     if match:
@@ -151,6 +153,7 @@ def _parseEdgeEndNodes(graph, outgoing_node, label, f):
     line = f.readline()
 
 def addEdge(graph, edge, label):
+  print label
   if graph.has_edge(edge):
     new_label = graph.edge_label(edge) + ", " + label
     graph.set_edge_label(edge, new_label)
@@ -168,6 +171,13 @@ def shortestPathToDataState(graph, node):
     return 0 
 
   return heuristic_search(graph, node, "dataState", zeroHeuristic)
+
+def shortestPathFromDataState(graph, node):
+
+  def zeroHeuristic(neighbor, goal):
+    return 0 
+
+  return heuristic_search(graph, "dataState", node, zeroHeuristic)
 
 def generateActionList(graph, path):
   prev_node = None
@@ -188,7 +198,12 @@ if __name__ == "__main__":
     reachable_nodes = depth_first_search(graph, "dataState")[1]
     for node in reachable_nodes:
       path = shortestPathToDataState(graph, node)
-      print node, generateActionList(graph, path)
+      #print node, generateActionList(graph, path)
+    #print "******************************"
+    #print "******************************"
+    for node in reachable_nodes:
+      path = shortestPathFromDataState(graph, node)
+      #print node, generateActionList(graph, path)
 
 
 
