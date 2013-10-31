@@ -1,0 +1,20 @@
+dataState Anything Else
+rcdataState Anything Else
+rawtextState Anything Else
+scriptDataState Anything Else
+plaintextState Anything Else
+tagNameState Anything Else
+scriptDataEscapedState Anything Else
+scriptDataDoubleEscapedState Anything Else
+attributeValueDoubleQuotedState Anything Else
+attributeValueSingleQuotedState Anything Else
+attributeValueUnQuotedState Anything Else
+commentState Anything Else
+doctypeNameState Anything Else
+doctypePublicIdentifierDoubleQuotedState Anything Else
+doctypePublicIdentifierSingleQuotedState Anything Else
+doctypeSystemIdentifierDoubleQuotedState Anything Else
+doctypeSystemIdentifierSingleQuotedState Anything Else
+bogusDoctypeState Anything Else
+set(['spaceCharacters', '!', '"', 'Anything Else', "'", '&', '">"', '-', '/', '\\u0000', '"/"', "''>'", '=', '<', '?', '>', 'asciiLetters', 'P', 'S', ']]>', '`', 'entity;', '--', "'/'", 'p', 's'])
+['dataState', 'entityDataState', 'tagOpenState', 'markupDeclarationOpenState', 'commentState', 'commentEndDashState', 'commentEndState', 'commentEndBangState', 'closeTagOpenState', 'tagNameState', 'beforeAttributeNameState', 'attributeNameState', 'beforeAttributeValueState', 'attributeValueDoubleQuotedState', 'afterAttributeValueState', 'selfClosingStartTagState', 'attributeValueUnQuotedState', 'attributeValueSingleQuotedState', 'afterAttributeNameState', 'bogusCommentState']

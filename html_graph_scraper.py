@@ -12,6 +12,19 @@ else_pattern = "[\s]*else:"
 end_node_pattern = "[\s]*self\.state = self\.([^\s]*)"
 parse_error_pattern = '.*tokenTypes\["ParseError"\].*'
 
+#Tag Names that are special because they move to rc data states and rawtext states
+special_tags = rcdataElements.union(cdataElements)
+other_tags = set(["asciiLetters"])
+all_tags_unicode = special_tags.union(other_tags)
+all_tags = []
+for tag in all_tags_unicode:
+  if tag is not None:
+    all_tags.append(tag.encode('ascii', 'ignore'))
+  else:
+    all_tags.append(tag)
+
+
+
 class UndoFile(file):
   
   def __init__ (self, fileObj):
@@ -38,7 +51,10 @@ def parseNodes(graph):
     match = re.match(state_node_pattern, line)
     if match:
       state_node = match.group(1)
-      graph.add_node(state_node)
+
+      #State Node for each special tag
+      for tag in all_tags:
+        graph.add_node((tag, state_node))
 
 def parseEdges(graph):
   f = UndoFile(open("tokenizer.py", "r"))
@@ -52,17 +68,17 @@ def parseEdges(graph):
         #We probably don't want to go near DOCTYPE and CDATA state
         #TODO BETTER MARKUPDECLARATION STATE
         edge = (outgoing_node, "commentState")
-        addEdge(graph, edge, "--")
+        addEdgeForTags(graph, edge, "--", all_tags)
         edge = (outgoing_node, "markupDeclarationOpenState")
-        addEdge(graph, edge, "Anything Else")
+        addEdgeForTags(graph, edge, "Anything Else", all_tags)
       elif outgoing_node == "cdataSectionState":
         #Parsing this is quite difficult, I rather add the edges in by hand
-        addEdge(graph, ("cdataSectionState", "dataState"), "]]>")
-        addEdge(graph, ("cdataSectionState", "dataState"), "Anything Else")
+        addEdgeForTags(graph, ("cdataSectionState", "dataState"), "]]>", all_tags)
+        addEdgeForTags(graph, ("cdataSectionState", "dataState"), "Anything Else", all_tags)
       elif outgoing_node == "bogusCommentState":
         #Bogus Comment State weirdly formatted too
-        addEdge(graph, ("bogusCommentState", "dataState"), ">")
-        addEdge(graph, ("bogusCommentState", "dataState"), "Anything Else")
+        addEdgeForTags(graph, ("bogusCommentState", "dataState"), ">", all_tags)
+        addEdgeForTags(graph, ("bogusCommentState", "dataState"), "Anything Else", all_tags)
       else:
         _parseEdgeLabels(graph, outgoing_node, f)
 
@@ -81,14 +97,14 @@ def _parseEdgeLabels(graph, outgoing_node, f):
       #Weird case where we consume an entity and then return back to the corresponding data state
       if outgoing_node == "entityDataState":
         edge = (outgoing_node, "dataState")
-        addEdge(graph, edge, "entity;")
+        addEdgeForTags(graph, edge, "entity;", all_tags)
         edge = (outgoing_node, "entityDataState")
-        addEdge(graph, edge, "Anything Else")
+        addEdgeForTags(graph, edge, "Anything Else", all_tags)
       elif outgoing_node == "characterReferenceInRcdataState":
         edge = (outgoing_node, "rcdataState")
-        addEdge(graph, edge, "entity;")
+        addEdgeForTags(graph, edge, "entity;", all_tags)
         edge = (outgoing_node, "characterReferenceInRcdataState")
-        addEdge(graph, edge, "Anything Else")
+        addEdgeForTags(graph, edge, "Anything Else", all_tags)
       else:
         print "WARNING: Unexpected consume entity for " + outgoing_node
 
@@ -98,7 +114,7 @@ def _parseEdgeLabels(graph, outgoing_node, f):
     match = re.match(edge_label_pattern, line)
     if match:
       label = match.group(3)
-      if not label == "EOF": 
+      if not label == "EOF":
         label = _sanitize(label)
         _parseEdgeEndNodes(graph, outgoing_node, label, f)
 
@@ -126,7 +142,7 @@ def _sanitize(label):
   elif label.startswith('(') and label.endswith(')'):
     if label == '(spaceCharacters | frozenset(("/", ">")))':
       #Hacky. I will just manually set the label when it looks like the above string
-      label = "spaceCharacters, '/', ''>'"
+      label = "spaceCharacters, /, >"
     else:
       #If in parens, evaluate it to get the value as a tuple or frozenset and covert it to a string delimited by commas
       label = ', '.join(eval(label))
@@ -153,8 +169,7 @@ def _parseEdgeEndNodes(graph, outgoing_node, label, f):
         if not found_end_node:
           #Probably is self edge
           edge = (outgoing_node, outgoing_node)
-          addEdge(graph, edge, label)
-          #print outgoing_node, label
+          addEdgeForTags(graph, edge, label, all_tags)
 
         f.undoReadLine()
         break
@@ -165,7 +180,7 @@ def _parseEdgeEndNodes(graph, outgoing_node, label, f):
         if not found_end_node:
           #Probably is self edge
           edge = (outgoing_node, outgoing_node)
-          addEdge(graph, edge, label)
+          addEdgeForTags(graph, edge, label, all_tags)
           #print outgoing_node, label
 
         f.undoReadLine()
@@ -177,27 +192,74 @@ def _parseEdgeEndNodes(graph, outgoing_node, label, f):
       if not found_end_node:
         #Probably is self edge
         edge = (outgoing_node, outgoing_node)
-        addEdge(graph, edge, label)
-        #print outgoing_node, label
+        if outgoing_node == "tagNameState" and label == "Anything Else":
+          #We are currently in the tag name state. Only allow "Anything Else" in the tag name if we are in a other tag name state after the tag open state
+          addEdgeForTags(graph, edge, label, ["asciiLetters"])
+        else:
+          addEdgeForTags(graph, edge, label, all_tags)
+
       f.undoReadLine()
       break
 
     if "self.emitCurrentToken()" in line:
-      #Weird case where we emit current token and return to the data state
-      edge = (outgoing_node, "dataState")
-      addEdge(graph, edge, label)
-      found_end_node = True
+      if "rawtext" not in outgoing_node and "script" not in outgoing_node and "rcdata" not in outgoing_node:
+        #When emitting tokens when not in rawtext, script, or rcdata states, we need to make sure we transition to the
+        #approriate data state depending on the tag
+        end_node = "dataState"
+        edge = (outgoing_node, end_node)
+        addEdgeForTags(graph, edge, label, other_tags)
 
-      line = f.readline()
+        end_node = "rcdataState"
+        edge = (outgoing_node, end_node)
+        addEdgeForTags(graph, edge, label, cdataElements)
+
+        end_node = "rawtextState"
+        edge = (outgoing_node, end_node)
+        addEdgeForTags(graph, edge, label, rcdataElements)
+
+        found_end_node = True
+      else:
+        #We are emitting tokens for the rawtext, script, or rcdata states. Set tag state to other and skip the next parsing the next line
+        #since we know it will tell us to go to data state anyways
+        end_node = "dataState"
+        edge = (outgoing_node, end_node)
+        addEdgeForTags(graph, edge, label, all_tags, end_tag="asciiLetters")
+
+        line = f.readline()
+        pass
+
+      line = f.readline();
       continue
-      
 
     match = re.match(end_node_pattern, line)
     if match:
       #We see an end node! We found our edge!
       end_node = match.group(1)
       edge = (outgoing_node, end_node)
-      addEdge(graph, edge, label)
+      if outgoing_node == "tagOpenState" and label == "asciiLetters":
+        #If we are in the tagOpenState, this is where we can change the tag state we are in
+        for tag in all_tags:
+          if tag is not None:
+            label = tag
+            addEdgeForTags(graph, edge, label, all_tags, end_tag=tag)
+          else:
+            addEdgeForTags(graph, edge, label, all_tags, end_tag=tag)
+      elif outgoing_node == "closeTagOpenState" and label == "asciiLetters":
+        #If we are in the closeTagOpenState, any tag counts to asciiLetters to close the tag.
+        print outgoing_node
+        for tag in all_tags:
+          if tag is not None:
+            label = tag
+            addEdgeForTags(graph, edge, label, all_tags, end_tag="asciiLetters")
+
+      elif "TagOpenState" in outgoing_node and label == "asciiLetters":
+        #Only add edges from any tag open state to the state transition using asciiLetters for strings equal to the tag state
+        for tag in all_tags:
+          if tag is not None:
+            label = tag
+            addEdgeForTags(graph, edge, label, [tag])
+      else:
+        addEdgeForTags(graph, edge, label, all_tags)
       found_end_node = True
 
       line = f.readline();
@@ -205,10 +267,18 @@ def _parseEdgeEndNodes(graph, outgoing_node, label, f):
 
     line = f.readline();
 
+def addEdgeForTags(graph, edge, label, tags, end_tag=None):
+  for tag in tags:
+    if end_tag is None:
+      edge_with_tag = ((tag, edge[0]), (tag, edge[1]))
+    else:
+      edge_with_tag = ((tag, edge[0]), (end_tag, edge[1])) 
+    addEdge(graph, edge_with_tag, label)
+
 def addEdge(graph, edge, label):
   if graph.has_edge(edge):
-    new_label = graph.edge_label(edge) + ", " + label
-    graph.set_edge_label(edge, new_label)
+      new_label = graph.edge_label(edge) + ", " + label
+      graph.set_edge_label(edge, new_label)
   else:
     try:
       graph.add_edge(edge, label=label)
@@ -216,6 +286,9 @@ def addEdge(graph, edge, label):
       #Something state is not in our graph. Probably random entity things though.
       #Just print error message to log and double check if we should consider entity states
       print "WARNING: " + e.message
+    except TypeError:
+      print "WARNING: Can't add edge" + str(edge)
+
 
 def shortestPathToDataState(graph, node):
 
@@ -293,22 +366,22 @@ class CommonStringSearchDict(dict):
 
 class CommonStringSearchProblem:
 
-  def __init__(self, graph, start_nodes, end_node):
+  def __init__(self, graph, start_nodes, end_state):
     self.graph = graph
     self.reverse_graph = graph.reverse()
     self.start_nodes = set(start_nodes)
-    self.end_node = end_node
+    self.end_state = end_state
     self.html_charset = allActions(graph)
 
     self.anything_else_characters = dict()
     for node in graph.nodes():
       actions = set()
-      for neighbor in self.reverse_graph.neighbors(node):
+      for neighbor in self.graph.neighbors(node):
         actions = actions.union(self.graph.edge_label((node, neighbor)).split(", "))
       self.anything_else_characters[node] = self.html_charset.difference(actions)
 
   def getStartState(self):
-    return Node(set([end_node]), [])
+    return Node(set([("asciiLetters", self.end_state)]), [])
 
   def isGoalState(self, node):
     return self.start_nodes.issubset(node.state)
@@ -377,28 +450,18 @@ def allActions(graph):
 
 if __name__ == "__main__":
     graph = parseGraph()
+    #print graph.neighbors((None, "tagOpenState"))
+    print graph.neighbors(("textarea", "rcdataState"))
+    #print graph.edge_label(((None, "tagNameState"), ('asciiLetters', "tagNameState")))
     #print graph.edge_label(("dataState", "dataState"))
     print allActions(graph)
 
-    reachable_nodes = depth_first_search(graph, "dataState")[1]
-    print reachable_nodes
-    end_node = "dataState"
-    problem = CommonStringSearchProblem(graph, reachable_nodes, end_node)
+    #reachable_nodes = depth_first_search(graph, (None, "dataState"))[1]
+    reachable_nodes = [("title", "rcdataState")]
+    #print reachable_nodes
+    end_state = "dataState"
+    problem = CommonStringSearchProblem(graph, reachable_nodes, end_state)
     Search.breadthFirstSearch(problem).path
-
-    """
-    print "SHORTEST PATHS TO DATA STATES"
-    reachable_nodes = depth_first_search(graph, "dataState")[1]
-    for node in reachable_nodes:
-      path = shortestPathToDataState(graph, node)
-      print node, generateActionList(graph, path)
-    print "******************************"
-    print "******************************"
-    print "SHORTEST PATHS FROM DATA STATE"
-    for node in reachable_nodes:
-      path = shortestPathFromDataState(graph, node)
-      print node, generateActionList(graph, path)
-    """
 
 
 
